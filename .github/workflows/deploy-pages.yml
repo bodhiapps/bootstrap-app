@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Configure VITE_BODHI_APP_CLIENT_ID in GitHub Repository Variables
-      VITE_BODHI_AUTH_SERVER_URL: https://id.getbodhi.app/realms/bodhi
-      VITE_BODHI_APP_CLIENT_ID: ${{ vars.VITE_BODHI_APP_CLIENT_ID }}
+      VITE_BODHI_AUTH_SERVER_URL: https://main-id.getbodhi.app/realms/bodhi
+      VITE_BODHI_APP_CLIENT_ID: bodhi-app-1282854b-ac93-4ef6-bc8e-d4d94dd63070
     steps:
       - uses: actions/checkout@v6
         with:
