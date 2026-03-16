@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useBodhi } from '@bodhiapp/bodhi-js-react';
 import { Plus, RefreshCw, ArrowUp } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,41 +12,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { SUGGESTED_PROMPTS } from '@/config/prompts';
+import { useAgenticChat } from '@/hooks/useAgenticChat';
+import type { AgenticMessage } from '@/hooks/useAgenticChat';
+import type { ChatTool, McpInfo } from '@/hooks/useMcpTools';
+import ChatMessage from './ChatMessage';
 
-export interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-interface MessageProps {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-function Message({ role, content }: MessageProps) {
-  const isUser = role === 'user';
-
-  return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div
-        data-testid={isUser ? 'message-user' : 'message-assistant'}
-        className={`max-w-[70%] px-4 py-2 rounded-lg ${
-          isUser ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'
-        }`}
-      >
-        <div className="whitespace-pre-wrap break-words">{content}</div>
-      </div>
-    </div>
-  );
-}
+// ---------------------------------------------------------------------------
+// ChatArea
+// ---------------------------------------------------------------------------
 
 interface ChatAreaProps {
-  messages: ChatMessage[];
-  isStreaming: boolean;
+  messages: AgenticMessage[];
+  isProcessing: boolean;
   error?: string | null;
+  onSuggestedPrompt: (prompt: string) => void;
 }
 
-function ChatArea({ messages, isStreaming, error }: ChatAreaProps) {
+function ChatArea({ messages, isProcessing, error, onSuggestedPrompt }: ChatAreaProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const isUserScrolledUpRef = useRef(false);
@@ -81,16 +64,24 @@ function ChatArea({ messages, isStreaming, error }: ChatAreaProps) {
   useEffect(() => {
     if (!isUserScrolledUpRef.current) {
       messagesEndRef.current?.scrollIntoView({
-        behavior: isStreaming ? 'instant' : 'smooth',
+        behavior: isProcessing ? 'instant' : 'smooth',
       });
     }
-  }, [messages, isStreaming]);
+  }, [messages, isProcessing]);
+
+  const chatState = error
+    ? 'error'
+    : isProcessing
+      ? 'streaming'
+      : messages.length === 0
+        ? 'empty'
+        : 'idle';
 
   return (
     <ScrollArea
       className="flex-1 overflow-hidden"
-      data-testid="chat-area"
-      data-teststate={error ? 'error' : isStreaming ? 'streaming' : 'idle'}
+      data-testid="div-chat-area"
+      data-test-state={chatState}
       ref={(node: HTMLDivElement | null) => {
         if (node) {
           const viewport = node.querySelector(
@@ -102,26 +93,60 @@ function ChatArea({ messages, isStreaming, error }: ChatAreaProps) {
         }
       }}
     >
-      <div className="p-4 bg-gray-50">
-        <div className="max-w-4xl mx-auto">
+      <div className="p-4 bg-mesh flex flex-col flex-1" style={{ minHeight: '100%' }}>
+        <div className="max-w-4xl mx-auto w-full flex flex-col flex-1">
           {messages.length === 0 ? (
-            <p className="text-center text-gray-400 mt-8">No messages yet. Start a conversation!</p>
+            <div
+              data-testid="div-chat-empty-state"
+              className="flex flex-col items-center flex-1 animate-fade-in-up"
+            >
+              <div className="flex flex-col items-center gap-4 pt-[12vh]">
+                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-bodhi-light to-bodhi-dark flex items-center justify-center shadow-lg shadow-bodhi/20 mb-1">
+                  <svg
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="white"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                  Bodhi Bot is ready
+                </h2>
+                <p className="text-muted-foreground text-center max-w-md leading-relaxed">
+                  Ask me to research any topic. I can search the web with Exa and save findings to
+                  Notion.
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-3 pb-4 pt-2 w-full mt-auto">
+                {SUGGESTED_PROMPTS.map((sp, i) => (
+                  <button
+                    key={i}
+                    data-testid="btn-suggested-prompt"
+                    onClick={() => onSuggestedPrompt(sp.prompt)}
+                    className="card-glow text-left px-5 py-4 rounded-2xl max-w-xs cursor-pointer"
+                    style={{ animationDelay: `${i * 80}ms` }}
+                  >
+                    <span className="block text-sm font-semibold text-foreground/85">
+                      {sp.title}
+                    </span>
+                    <span className="block text-xs text-muted-foreground mt-1.5 line-clamp-2 leading-relaxed">
+                      {sp.prompt}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : (
             <>
               {messages.map((msg, index) => (
-                <Message key={index} role={msg.role} content={msg.content} />
+                <ChatMessage key={index} message={msg} index={index} />
               ))}
-              {isStreaming && (
-                <div data-testid="streaming-indicator" className="flex justify-start mb-4">
-                  <div className="bg-gray-200 px-4 py-2 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-gray-600 rounded-full animate-pulse" />
-                      <div className="w-2 h-2 bg-gray-600 rounded-full animate-pulse delay-100" />
-                      <div className="w-2 h-2 bg-gray-600 rounded-full animate-pulse delay-200" />
-                    </div>
-                  </div>
-                </div>
-              )}
               <div ref={messagesEndRef} />
             </>
           )}
@@ -131,6 +156,10 @@ function ChatArea({ messages, isStreaming, error }: ChatAreaProps) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// InputArea
+// ---------------------------------------------------------------------------
+
 interface InputAreaProps {
   onSendMessage: (message: string) => Promise<void>;
   onClearMessages: () => void;
@@ -138,7 +167,8 @@ interface InputAreaProps {
   setSelectedModel: (model: string) => void;
   models: string[];
   isLoadingModels: boolean;
-  onRefreshModels: () => void;
+  inputValue: string;
+  setInputValue: (value: string) => void;
 }
 
 function InputArea({
@@ -148,10 +178,10 @@ function InputArea({
   setSelectedModel,
   models,
   isLoadingModels,
-  onRefreshModels,
+  inputValue,
+  setInputValue,
 }: InputAreaProps) {
   const { isReady, isAuthenticated } = useBodhi();
-  const [message, setMessage] = useState('');
 
   const isDisabled = !isReady || !isAuthenticated;
 
@@ -162,40 +192,41 @@ function InputArea({
   };
 
   const handleSubmit = async () => {
-    if (isDisabled || !message.trim()) return;
-    const messageToSend = message;
-    setMessage('');
+    if (isDisabled || !inputValue.trim()) return;
+    const messageToSend = inputValue;
+    setInputValue('');
     await onSendMessage(messageToSend);
   };
 
   const handleNewChat = () => {
     onClearMessages();
-    setMessage('');
+    setInputValue('');
   };
 
   return (
-    <div className="w-full px-4 py-4">
+    <div className="w-full px-4 py-4 glass border-t border-bodhi/15">
       <div className="max-w-4xl mx-auto">
-        <div className="grid grid-cols-[auto_1fr_auto] grid-rows-[1fr_auto] gap-2 p-3 bg-white border border-gray-200 rounded-3xl shadow-sm">
+        <div className="input-container grid grid-cols-[auto_1fr_auto] grid-rows-[1fr_auto] gap-2 p-3 bg-bodhi-50/40 backdrop-blur-md border border-bodhi/20 rounded-3xl">
           <Button
+            data-testid="btn-chat-new"
             onClick={handleNewChat}
             variant="ghost"
             size="icon"
             title="New chat"
             disabled={isDisabled}
-            className="row-span-2 self-center"
+            className="row-span-2 self-center text-muted-foreground hover:text-bodhi"
           >
             <Plus />
           </Button>
 
           <Input
-            data-testid="chat-input"
-            value={message}
-            onChange={e => setMessage(e.target.value)}
+            data-testid="input-chat-message"
+            value={inputValue}
+            onChange={e => setInputValue(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSubmit()}
             placeholder={getHintText()}
             disabled={isDisabled}
-            className="col-start-2 border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+            className="col-start-2 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 chat-text"
           />
 
           <div className="col-start-2 flex items-center gap-2 justify-end">
@@ -205,8 +236,8 @@ function InputArea({
               disabled={models.length === 0}
             >
               <SelectTrigger
-                data-testid="model-selector"
-                className="w-[240px] border-0 focus:ring-0"
+                data-testid="select-model"
+                className="w-[240px] border-0 focus:ring-0 text-muted-foreground text-sm"
               >
                 <SelectValue placeholder="No models" />
               </SelectTrigger>
@@ -221,7 +252,9 @@ function InputArea({
 
             <Button
               data-testid="btn-refresh-models"
-              onClick={onRefreshModels}
+              onClick={() => {
+                // Model loading is automatic on auth
+              }}
               variant="ghost"
               size="icon"
               title="Refresh models"
@@ -232,12 +265,12 @@ function InputArea({
           </div>
 
           <Button
-            data-testid="send-button"
+            data-testid="btn-chat-send"
             onClick={handleSubmit}
-            disabled={isDisabled || !message.trim()}
+            disabled={isDisabled || !inputValue.trim()}
             variant="ghost"
             size="icon"
-            className="row-span-2 col-start-3 self-center"
+            className="row-span-2 col-start-3 self-center rounded-full bg-bodhi/90 text-white hover:bg-bodhi-dark hover:text-white disabled:bg-muted disabled:text-muted-foreground"
             title="Send message"
           >
             <ArrowUp />
@@ -248,176 +281,48 @@ function InputArea({
   );
 }
 
-function useChat() {
-  const { client, isAuthenticated, isReady } = useBodhi();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [models, setModels] = useState<string[]>([]);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const isLoadingModelsRef = useRef(false);
+// ---------------------------------------------------------------------------
+// ChatDemo
+// ---------------------------------------------------------------------------
 
-  const loadModels = useCallback(async () => {
-    if (isLoadingModelsRef.current) return;
-    isLoadingModelsRef.current = true;
-
-    setIsLoadingModels(true);
-    setError(null);
-    try {
-      if (!isAuthenticated) {
-        setError('Please log in to load models');
-        return;
-      }
-
-      const modelIds: string[] = [];
-      const response = client.models.list();
-
-      if (!response || typeof response[Symbol.asyncIterator] !== 'function') {
-        throw new Error('Invalid response from server');
-      }
-
-      for await (const model of response) {
-        modelIds.push(model.id);
-      }
-
-      setModels(modelIds);
-      if (modelIds.length > 0 && !selectedModel) {
-        setSelectedModel(modelIds[0]);
-      }
-    } catch (err) {
-      console.error('Failed to fetch models:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch models';
-      setError(errorMessage);
-    } finally {
-      setIsLoadingModels(false);
-      isLoadingModelsRef.current = false;
-    }
-  }, [client, selectedModel, isAuthenticated]);
-
-  useEffect(() => {
-    if (isReady && isAuthenticated && models.length === 0 && !isLoadingModels) {
-      loadModels();
-    }
-  }, [isReady, isAuthenticated, models.length, isLoadingModels, loadModels]);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      abortControllerRef.current?.abort();
-      abortControllerRef.current = null;
-      setMessages([]);
-      setSelectedModel('');
-      setModels([]);
-      setError(null);
-    }
-  }, [isAuthenticated]);
-
-  const sendMessage = async (prompt: string) => {
-    if (!selectedModel) {
-      setError('Please select a model first');
-      return;
-    }
-
-    setError(null);
-    setIsStreaming(true);
-
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    const conversationMessages: ChatMessage[] = [...messages, { role: 'user', content: prompt }];
-
-    setMessages(prev => [...prev, { role: 'user', content: prompt }]);
-    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-
-    try {
-      const stream = client.chat.completions.create({
-        model: selectedModel,
-        messages: conversationMessages,
-        stream: true,
-      });
-
-      for await (const chunk of stream) {
-        if (abortController.signal.aborted) {
-          break;
-        }
-        const content = chunk.choices?.[0]?.delta?.content || '';
-        if (content) {
-          setMessages(prev => {
-            const updated = [...prev];
-            const lastIndex = updated.length - 1;
-            updated[lastIndex] = {
-              ...updated[lastIndex],
-              content: updated[lastIndex].content + content,
-            };
-            return updated;
-          });
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return;
-      }
-      console.error('Failed to send message:', err);
-      setError(err instanceof Error ? err.message : 'Failed to send message');
-      setMessages(prev => prev.slice(0, -1));
-    } finally {
-      setIsStreaming(false);
-      abortControllerRef.current = null;
-    }
-  };
-
-  const clearMessages = () => {
-    setMessages([]);
-    setError(null);
-  };
-
-  const clearError = () => {
-    setError(null);
-  };
-
-  return {
-    messages,
-    isStreaming,
-    selectedModel,
-    setSelectedModel,
-    sendMessage,
-    clearMessages,
-    error,
-    clearError,
-    models,
-    isLoadingModels,
-    loadModels,
-  };
+interface ChatDemoProps {
+  tools?: ChatTool[];
+  mcps?: McpInfo[];
 }
 
-export default function ChatDemo() {
+export default function ChatDemo({ tools = [], mcps = [] }: ChatDemoProps) {
   const {
     messages,
-    isStreaming,
-    selectedModel,
-    setSelectedModel,
+    isProcessing,
     sendMessage,
     clearMessages,
     error: chatError,
-    clearError: clearChatError,
     models,
+    selectedModel,
+    setSelectedModel,
     isLoadingModels,
-    loadModels,
-  } = useChat();
+  } = useAgenticChat(tools, mcps);
+
+  const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
     if (chatError) {
-      toast.error(chatError, {
-        onDismiss: clearChatError,
-        onAutoClose: clearChatError,
-      });
+      toast.error(chatError);
     }
-  }, [chatError, clearChatError]);
+  }, [chatError]);
+
+  const handleSuggestedPrompt = (prompt: string) => {
+    setInputValue(prompt);
+  };
 
   return (
     <>
-      <ChatArea messages={messages} isStreaming={isStreaming} error={chatError} />
+      <ChatArea
+        messages={messages}
+        isProcessing={isProcessing}
+        error={chatError}
+        onSuggestedPrompt={handleSuggestedPrompt}
+      />
       <InputArea
         onSendMessage={sendMessage}
         onClearMessages={clearMessages}
@@ -425,7 +330,8 @@ export default function ChatDemo() {
         setSelectedModel={setSelectedModel}
         models={models}
         isLoadingModels={isLoadingModels}
-        onRefreshModels={loadModels}
+        inputValue={inputValue}
+        setInputValue={setInputValue}
       />
     </>
   );
